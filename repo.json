@@ -3,7 +3,7 @@
         "Author": "Tuconei",
         "Name": "Simple Roll Tracker",
         "InternalName": "SimpleRollTracker",
-        "AssemblyVersion": "0.0.3.0",
+        "AssemblyVersion": "0.4.0.0",
         "Description": "Tracks dice rolls, captures names, and highlights winners.",
         "ApplicableVersion": "any",
         "DalamudApiLevel": 13,
@@ -11,12 +11,13 @@
         "IconUrl": "",
         "ImageUrls": [],
         "Punchline": "Simple roll tracker for venues.",
-        "DownloadLinkInstall": "https://github.com/Tuconei/SimpleRollTracker/releases/download/v0.3/SimpleRollTracker_v0.3.zip",
+        "DownloadLinkInstall": "https://github.com/Tuconei/SimpleRollTracker/releases/download/v0.4/SimpleRollTracker_v0.4.zip",
         "IsHide": false,
         "IsTestingExclusive": false,
         "LastUpdate": 1700000000
     }
 
 ]
+
 
 
