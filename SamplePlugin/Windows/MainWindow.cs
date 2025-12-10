@@ -1,25 +1,28 @@
-using System;
-using System.Numerics;
-using System.Linq;
+#nullable enable
+using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Utility;
 using Dalamud.Interface.Windowing;
-using SamplePlugin;
-
-// API 13 Compatibility Aliases
+using SimpleRollTracker;
+using System;
+using System.Linq;
+using System.Numerics;
 using ImGui = Dalamud.Bindings.ImGui.ImGui;
-using ImGuiTableFlags = Dalamud.Bindings.ImGui.ImGuiTableFlags;
-using ImGuiTableColumnFlags = Dalamud.Bindings.ImGui.ImGuiTableColumnFlags;
 using ImGuiCond = Dalamud.Bindings.ImGui.ImGuiCond;
+using ImGuiSortDirection = Dalamud.Bindings.ImGui.ImGuiSortDirection;
+using ImGuiTableColumnFlags = Dalamud.Bindings.ImGui.ImGuiTableColumnFlags;
+using ImGuiTableFlags = Dalamud.Bindings.ImGui.ImGuiTableFlags;
 
-namespace SamplePlugin.Windows
+namespace SimpleRollTracker.Windows
 {
     public class MainWindow : Window, IDisposable
     {
         private Plugin plugin;
+        private int nextTargetInput = 0;
+        private int nextFunnyInput = 0;
 
         public MainWindow(Plugin plugin) : base("Simple Roll Tracker")
         {
-            this.Size = new Vector2(375, 520);
+            this.Size = new Vector2(400, 850);
             this.SizeCondition = ImGuiCond.FirstUseEver;
             this.plugin = plugin;
         }
@@ -28,7 +31,7 @@ namespace SamplePlugin.Windows
 
         public override void Draw()
         {
-            // --- CONTROL PANEL ---
+            // --- CONTROL ---
             if (ImGui.Button(this.plugin.IsRecording ? "STOP CAPTURING" : "START CAPTURING"))
                 this.plugin.IsRecording = !this.plugin.IsRecording;
 
@@ -36,20 +39,66 @@ namespace SamplePlugin.Windows
             if (ImGui.Button("Clear List"))
                 this.plugin.RollHistory.Clear();
 
+            ImGui.SameLine();
+            ImGui.SetNextItemWidth(80);
+            if (ImGui.InputInt("Clear > X Mins", ref this.plugin.ClearMinutes))
+            {
+                if (this.plugin.ClearMinutes < 0) this.plugin.ClearMinutes = 0;
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Automatically remove rolls older than X minutes (0 = Disabled)");
+
             ImGui.Separator();
 
-            // --- GAME MODES ---
-            // Updated Label: EXACT wins
-            if (ImGui.Checkbox("Target Mode (EXACT wins)", ref this.plugin.TargetMode))
+            // --- LOCK ---
+            if (string.IsNullOrEmpty(this.plugin.LockedTargetName))
             {
-                // Optional: Clear list when switching modes
-                // this.plugin.RollHistory.Clear(); 
+                if (ImGui.Button("Lock to Current Target"))
+                {
+                    var currentTarget = Plugin.TargetManager.Target;
+                    if (currentTarget != null) this.plugin.LockedTargetName = currentTarget.Name.ToString();
+                }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Only accept rolls from your currently selected target.");
             }
+            else
+            {
+                ImGui.TextColored(new Vector4(1, 0, 0, 1), $"LOCKED: {this.plugin.LockedTargetName}");
+                ImGui.SameLine();
+                if (ImGui.Button("UNLOCK")) this.plugin.LockedTargetName = string.Empty;
+            }
+
+            if (ImGui.Checkbox("Allow only 1 roll per person", ref this.plugin.OneRollPerPerson)) { }
+
+            ImGui.Separator();
+
+            // --- TARGET MODE ---
+            if (ImGui.Checkbox("Target Mode (Specific Wins)", ref this.plugin.TargetMode)) { }
 
             if (this.plugin.TargetMode)
             {
                 ImGui.SetNextItemWidth(100);
-                ImGui.InputInt("Target #", ref this.plugin.TargetNumber);
+                ImGui.InputInt("##NewTarget", ref nextTargetInput, 0);
+                ImGui.SameLine();
+                if (ImGui.Button("Add #"))
+                {
+                    if (!this.plugin.TargetNumbers.Contains(nextTargetInput) && nextTargetInput > 0)
+                        this.plugin.TargetNumbers.Add(nextTargetInput);
+                }
+
+                ImGui.SameLine();
+                ImGui.Checkbox("Closest Wins", ref this.plugin.ClosestWins);
+
+                if (this.plugin.TargetNumbers.Count > 0)
+                {
+                    ImGui.Text("Targets:");
+                    foreach (var num in this.plugin.TargetNumbers.ToList())
+                    {
+                        ImGui.SameLine();
+                        if (ImGui.SmallButton($"{num} x"))
+                        {
+                            this.plugin.TargetNumbers.Remove(num);
+                        }
+                    }
+                }
             }
             else
             {
@@ -60,22 +109,89 @@ namespace SamplePlugin.Windows
 
             ImGui.Separator();
 
-            // --- THE WINNER'S PODIUM ---
-            Plugin.RollEntry winner = null;
-
-            if (this.plugin.RollHistory.Count > 0)
+            // --- ANALYTICS ---
+            if (ImGui.CollapsingHeader("Session Analytics"))
             {
-                if (this.plugin.TargetMode)
+                if (this.plugin.RollHistory.Count > 0)
                 {
-                    // LOGIC CHANGE: Only look for EXACT matches.
-                    // We take the FIRST person to hit it (classic contest rules).
-                    winner = this.plugin.RollHistory
-                        .Where(r => r.RollValue == this.plugin.TargetNumber)
-                        .FirstOrDefault();
+                    var highest = this.plugin.RollHistory.MaxBy(r => r.RollValue);
+                    var lowest = this.plugin.RollHistory.MinBy(r => r.RollValue);
+                    var avg = this.plugin.RollHistory.Average(r => r.RollValue);
+                    var total = this.plugin.RollHistory.Count;
+
+                    ImGui.Text($"Total Rolls: {total}");
+                    ImGui.Text($"Highest Roll: {highest?.RollValue} ({highest?.PlayerName})");
+                    ImGui.Text($"Lowest Roll: {lowest?.RollValue} ({lowest?.PlayerName})");
+                    ImGui.Text($"Average Roll: {avg:F1}");
                 }
                 else
                 {
-                    // STANDARD LOGIC
+                    ImGui.TextDisabled("No data recorded yet.");
+                }
+            }
+
+            ImGui.Separator();
+
+            // --- ANNOUNCEMENT SETTINGS (RESTORED) ---
+            if (ImGui.CollapsingHeader("Announcement Template"))
+            {
+                ImGui.TextDisabled("Use {winner}, {roll} as placeholders.");
+                ImGui.InputText("Template", ref this.plugin.MsgWinner, 256);
+            }
+
+            ImGui.Separator();
+
+            // --- FUNNY NUMBERS ---
+            if (ImGui.CollapsingHeader("Funny Numbers (Cyan Highlight)"))
+            {
+                ImGui.SetNextItemWidth(100);
+                ImGui.InputInt("##NewFunny", ref nextFunnyInput, 0);
+                ImGui.SameLine();
+                if (ImGui.Button("Add Funny #"))
+                {
+                    if (!this.plugin.FunnyNumbers.Contains(nextFunnyInput) && nextFunnyInput >= 0)
+                        this.plugin.FunnyNumbers.Add(nextFunnyInput);
+                }
+
+                if (this.plugin.FunnyNumbers.Count > 0)
+                {
+                    foreach (var num in this.plugin.FunnyNumbers.ToList())
+                    {
+                        ImGui.SameLine();
+                        if (ImGui.SmallButton($"{num} x##funny"))
+                        {
+                            this.plugin.FunnyNumbers.Remove(num);
+                        }
+                    }
+                }
+            }
+
+            ImGui.Separator();
+
+            // --- WINNER ---
+            Plugin.RollEntry? winner = null;
+
+            if (this.plugin.RollHistory.Count > 0)
+            {
+                if (this.plugin.TargetMode && this.plugin.TargetNumbers.Count > 0)
+                {
+                    if (this.plugin.ClosestWins)
+                    {
+                        winner = this.plugin.RollHistory
+                            .OrderBy(r => this.plugin.TargetNumbers.Min(t => Math.Abs(r.RollValue - t)))
+                            .ThenBy(r => r.Time)
+                            .FirstOrDefault();
+                    }
+                    else
+                    {
+                        winner = this.plugin.RollHistory
+                            .Where(r => this.plugin.TargetNumbers.Contains(r.RollValue))
+                            .OrderByDescending(r => r.Time)
+                            .FirstOrDefault();
+                    }
+                }
+                else if (!this.plugin.TargetMode)
+                {
                     if (this.plugin.HighWins)
                         winner = this.plugin.RollHistory.OrderByDescending(r => r.RollValue).FirstOrDefault();
                     else
@@ -86,77 +202,127 @@ namespace SamplePlugin.Windows
             if (winner != null)
             {
                 var windowWidth = ImGui.GetWindowSize().X;
-
                 string winLabel;
-                // Updated Label for Podium
-                if (this.plugin.TargetMode) winLabel = $"🎯 MATCHED {this.plugin.TargetNumber} 🎯";
-                else winLabel = this.plugin.HighWins ? "👑 HIGH ROLLER 👑" : "💀 LOW ROLLER 💀";
+                if (this.plugin.TargetMode)
+                {
+                    if (this.plugin.ClosestWins)
+                    {
+                        int closestTarget = this.plugin.TargetNumbers.OrderBy(t => Math.Abs(winner.RollValue - t)).First();
+                        int diff = Math.Abs(winner.RollValue - closestTarget);
+                        winLabel = diff == 0 ? $"🎯 EXACT MATCH ({closestTarget}) 🎯" : $"🎯 CLOSEST TO {closestTarget} (Diff: {diff}) 🎯";
+                    }
+                    else
+                    {
+                        winLabel = $"🎯 WINNER! ({winner.RollValue}) 🎯";
+                    }
+                }
+                else
+                {
+                    winLabel = this.plugin.HighWins ? "👑 HIGH ROLLER 👑" : "💀 LOW ROLLER 💀";
+                }
 
-                // Center Label
                 var labelWidth = ImGui.CalcTextSize(winLabel).X;
                 ImGui.SetCursorPosX((windowWidth - labelWidth) * 0.5f);
                 ImGui.TextColored(new Vector4(1, 0.8f, 0, 1), winLabel);
 
-                // Center Name
                 var resultText = $"{winner.PlayerName}: {winner.RollValue}";
                 var resultWidth = ImGui.CalcTextSize(resultText).X;
                 ImGui.SetCursorPosX((windowWidth - resultWidth) * 0.5f);
-                ImGui.Text(resultText);
 
-                // COPY BUTTON
-                if (ImGui.Button("Copy Result", new Vector2(-1, 0)))
+                if (ImGui.Selectable(resultText, false, ImGuiSelectableFlags.None, new Vector2(resultWidth, 0)))
                 {
-                    var winType = this.plugin.TargetMode ? $"Exact Match {this.plugin.TargetNumber}" : (this.plugin.HighWins ? "Highest" : "Lowest");
-                    ImGui.SetClipboardText($"Current Winner ({winType}): {winner.PlayerName} with {winner.RollValue}!");
+                    this.plugin.TargetPlayerByName(winner.PlayerName);
+                }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Click to Target Winner");
+
+                // --- COPY ANNOUNCEMENT BUTTON (RESTORED) ---
+                if (ImGui.Button("Copy Announcement", new Vector2(-1, 0)))
+                {
+                    string message = this.plugin.MsgWinner;
+                    var shortName = winner.PlayerName.Split('@')[0];
+                    message = message.Replace("{winner}", shortName)
+                                     .Replace("{roll}", winner.RollValue.ToString());
+
+                    ImGui.SetClipboardText(message);
                 }
             }
             else
             {
-                // Text changed to reflect that we are waiting for a specific number
-                if (this.plugin.TargetMode)
-                    ImGui.Text($"Waiting for a {this.plugin.TargetNumber}...");
-                else
-                    ImGui.Text("Waiting for rolls...");
+                if (this.plugin.TargetMode) ImGui.Text($"Waiting for matches...");
+                else ImGui.Text("Waiting for rolls...");
             }
 
             ImGui.Separator();
 
-            // --- STATS & TABLE ---
             ImGui.Text($"Total Rolls: {this.plugin.RollHistory.Count}");
+            ImGui.SameLine();
+            ImGui.TextDisabled("(Click name to target)");
 
-            if (ImGui.BeginTable("RollsTable", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY))
+            // --- TABLE ---
+            if (ImGui.BeginTable("RollsTable", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.Sortable | ImGuiTableFlags.Resizable))
             {
-                ImGui.TableSetupColumn("Time", ImGuiTableColumnFlags.WidthFixed, 70);
-                ImGui.TableSetupColumn("Player");
-                ImGui.TableSetupColumn("Roll", ImGuiTableColumnFlags.WidthFixed, 50);
+                ImGui.TableSetupColumn("Time", ImGuiTableColumnFlags.WidthFixed | ImGuiTableColumnFlags.DefaultSort, 90, 0);
+                ImGui.TableSetupColumn("Player", ImGuiTableColumnFlags.None, 0, 1);
+                ImGui.TableSetupColumn("Roll", ImGuiTableColumnFlags.WidthFixed, 50, 2);
+                ImGui.TableSetupColumn("Del", ImGuiTableColumnFlags.WidthFixed, 45, 3);
                 ImGui.TableHeadersRow();
 
-                foreach (var roll in ((System.Collections.Generic.IEnumerable<Plugin.RollEntry>)this.plugin.RollHistory).Reverse())
+                var sortedList = this.plugin.RollHistory.ToList();
+                var sortSpecs = ImGui.TableGetSortSpecs();
+                if (sortSpecs.SpecsCount > 0)
+                {
+                    var spec = sortSpecs.Specs;
+                    switch (spec.ColumnIndex)
+                    {
+                        case 0: sortedList = spec.SortDirection == ImGuiSortDirection.Ascending ? sortedList.OrderBy(r => r.Time).ToList() : sortedList.OrderByDescending(r => r.Time).ToList(); break;
+                        case 1: sortedList = spec.SortDirection == ImGuiSortDirection.Ascending ? sortedList.OrderBy(r => r.PlayerName).ToList() : sortedList.OrderByDescending(r => r.PlayerName).ToList(); break;
+                        case 2: sortedList = spec.SortDirection == ImGuiSortDirection.Ascending ? sortedList.OrderBy(r => r.RollValue).ToList() : sortedList.OrderByDescending(r => r.RollValue).ToList(); break;
+                    }
+                }
+                else sortedList = sortedList.OrderByDescending(r => r.Time).ToList();
+
+                foreach (var roll in sortedList)
                 {
                     ImGui.TableNextRow();
 
-                    // COLOR LOGIC
-                    Vector4 textColor = new Vector4(1, 1, 1, 1); // Default White
+                    Vector4 textColor = new Vector4(1, 1, 1, 1);
 
-                    if (this.plugin.TargetMode)
+                    if (this.plugin.TargetMode && this.plugin.TargetNumbers.Count > 0)
                     {
-                        // If in Target Mode, ONLY highlight the exact match
-                        if (roll.RollValue == this.plugin.TargetNumber)
-                            textColor = new Vector4(0, 1, 0, 1); // Bright Green for Winner
+                        if (this.plugin.TargetNumbers.Contains(roll.RollValue)) textColor = new Vector4(0, 1, 0, 1);
+                        else if (this.plugin.ClosestWins && winner != null && roll == winner) textColor = new Vector4(1, 0.8f, 0, 1);
+                    }
+                    else if (!this.plugin.TargetMode && roll.RollValue == 777) textColor = new Vector4(1, 0.8f, 0, 1);
+                    else if (this.plugin.FunnyNumbers.Contains(roll.RollValue)) textColor = new Vector4(0, 1, 1, 1);
+
+                    ImGui.TableNextColumn();
+                    ImGui.TextColored(textColor, roll.Time.ToString("HH:mm:ss"));
+
+                    ImGui.TableNextColumn();
+                    if (roll.PlayerName == "You")
+                    {
+                        ImGui.TextColored(textColor, "You");
                     }
                     else
                     {
-                        // Standard Mode: Gold for 777
-                        if (roll.RollValue == 777)
-                            textColor = new Vector4(1, 0.8f, 0, 1);
+                        ImGui.PushID(roll.PlayerName + roll.Time.Ticks);
+                        if (ImGui.Selectable(roll.PlayerName))
+                        {
+                            this.plugin.TargetPlayerByName(roll.PlayerName);
+                        }
+                        ImGui.PopID();
                     }
 
                     ImGui.TableNextColumn();
-                    ImGui.TextColored(textColor, roll.Time.ToString("HH:mm"));
-                    ImGui.TableNextColumn();
-                    ImGui.TextColored(textColor, roll.PlayerName);
-                    ImGui.TableNextColumn();
                     ImGui.TextColored(textColor, roll.RollValue.ToString());
+
+                    ImGui.TableNextColumn();
+                    ImGui.PushID("del" + roll.PlayerName + roll.Time.Ticks);
+                    if (ImGui.SmallButton("x"))
+                    {
+                        this.plugin.RemoveRoll(roll);
+                    }
+                    ImGui.PopID();
                 }
                 ImGui.EndTable();
             }

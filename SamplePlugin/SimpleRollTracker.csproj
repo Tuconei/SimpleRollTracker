@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFramework>net9.0-windows</TargetFramework>
+        <Platforms>x64</Platforms>
+        <Nullable>disable</Nullable>
+        <LangVersion>latest</LangVersion>
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+        <!-- EXPLICIT VERSION: Matches your Manifest -->
+        <Version>0.4.0.0</Version>
+
+        <AssemblyName>SimpleRollTracker</AssemblyName>
+        <RootNamespace>SimpleRollTracker</RootNamespace>
+        <OutputType>Library</OutputType>
+
+        <DalamudLibPath>$(AppData)\XIVLauncher\addon\Hooks\dev\</DalamudLibPath>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Update="SimpleRollTracker.json">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        </None>
+        <Content Include="..\Data\goat.png">
+            <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+            <Visible>false</Visible>
+        </Content>
+    </ItemGroup>
+
+    <ItemGroup>
+        <Reference Include="Dalamud">
+            <HintPath>$(DalamudLibPath)Dalamud.dll</HintPath>
+            <Private>False</Private>
+        </Reference>
+        <Reference Include="ImGui.NET">
+            <HintPath>$(DalamudLibPath)Dalamud.Bindings.ImGui.dll</HintPath>
+            <Private>False</Private>
+        </Reference>
+    </ItemGroup>
+</Project>

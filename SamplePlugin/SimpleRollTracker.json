@@ -1,0 +1,12 @@
+{
+    "Author": "Tuconei",
+    "Name": "Simple Roll Tracker",
+    "InternalName": "SimpleRollTracker",
+    "AssemblyVersion": "0.4.0.0",
+    "Description": "Tracks dice rolls in chat.",
+    "ApplicableVersion": "any",
+    "DalamudApiLevel": 13,
+    "LoadPriority": 0,
+    "ImageUrls": [],
+    "Punchline": "Simple roll tracker."
+}
