@@ -151,7 +151,12 @@ namespace SimpleRollTracker
                 if (string.IsNullOrEmpty(capturedName)) capturedName = sender.ToString();
                 capturedName = CleanPlayerName(capturedName);
 
-                if (!string.IsNullOrEmpty(this.LockedTargetName) && capturedName != this.LockedTargetName) return;
+                if (!string.IsNullOrEmpty(this.LockedTargetName))
+                {
+                    // Compare base names only (strip @Server for cross-world players)
+                    var baseNameFromRoll = capturedName.Split('@')[0];
+                    if (baseNameFromRoll != this.LockedTargetName) return;
+                }
 
                 if (this.OneRollPerPerson)
                 {
