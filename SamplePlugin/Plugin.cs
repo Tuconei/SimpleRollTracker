@@ -1,4 +1,5 @@
 #nullable enable
+using Dalamud.Game.Chat;
 using Dalamud.Game.ClientState.Objects;
 using Dalamud.Game.Command;
 using Dalamud.Game.Text;
@@ -119,14 +120,14 @@ namespace SimpleRollTracker
             return spacedName;
         }
 
-        private void OnChatMessage(XivChatType type, int timestamp, ref SeString sender, ref SeString message, ref bool isHandled)
+        private void OnChatMessage(IHandleableChatMessage msg)
         {
-            if (type == XivChatType.Echo) return;
+            if (msg.LogKind == XivChatType.Echo) return;
             if (!this.IsRecording) return;
 
             CleanOldRolls();
 
-            var text = message.ToString();
+            var text = msg.Message.ToString();
             if (!text.Contains("Random!")) return;
 
             string capturedName = "";
@@ -142,13 +143,13 @@ namespace SimpleRollTracker
             }
             else if (diceMatch.Success)
             {
-                capturedName = sender.ToString();
+                capturedName = msg.Sender.ToString();
                 rollValue = int.Parse(diceMatch.Groups[1].Value);
             }
 
             if (rollValue != -1)
             {
-                if (string.IsNullOrEmpty(capturedName)) capturedName = sender.ToString();
+                if (string.IsNullOrEmpty(capturedName)) capturedName = msg.Sender.ToString();
                 capturedName = CleanPlayerName(capturedName);
 
                 if (!string.IsNullOrEmpty(this.LockedTargetName))
