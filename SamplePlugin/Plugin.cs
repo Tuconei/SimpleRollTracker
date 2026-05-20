@@ -30,14 +30,8 @@ namespace SimpleRollTracker
         [PluginService] internal static ITargetManager TargetManager { get; private set; } = null!;
         [PluginService] internal static IObjectTable ObjectTable { get; private set; } = null!;
 
-        public class RollEntry
-        {
-            public string PlayerName { get; set; } = string.Empty;
-            public int RollValue { get; set; }
-            public DateTime Time { get; set; }
-        }
-
-        public List<RollEntry> RollHistory = new List<RollEntry>();
+        public List<RollEntry> RollHistory => Config.RollHistory;
+        public List<LapEntry> Laps => Config.Laps;
 
         public bool IsRecording = true;
         public bool HighWins = true;
@@ -45,7 +39,12 @@ namespace SimpleRollTracker
         public bool ClosestWins = false;
 
         public List<int> TargetNumbers = new List<int>();
+        public bool ThresholdMode = false;
+        public int ThresholdValue = 500;
+        public bool ThresholdAbove = true;
         public List<int> FunnyNumbers = new List<int> { 0, 1, 69, 420, 777, 999 };
+
+        public Configuration Config { get; private set; }
 
         public int ClearMinutes = 0;
         public string LockedTargetName = string.Empty;
@@ -61,6 +60,10 @@ namespace SimpleRollTracker
 
         public Plugin()
         {
+            Config = PluginInterface.GetPluginConfig() as Configuration ?? new Configuration();
+            ClearMinutes = Config.ClearMinutes;
+            IsRecording = Config.IsRecording;
+
             this.MainWindow = new MainWindow(this);
             this.WindowSystem.AddWindow(this.MainWindow);
 
@@ -87,23 +90,80 @@ namespace SimpleRollTracker
 
         private void OnMacroCommand(string command, string args)
         {
-            if (command == "/startrolls") { this.IsRecording = true; ChatGui.Print("Roll Tracker: Recording STARTED."); }
-            else if (command == "/stoprolls") { this.IsRecording = false; ChatGui.Print("Roll Tracker: Recording STOPPED."); }
-            else if (command == "/clearrolls") { this.RollHistory.Clear(); ChatGui.Print("Roll Tracker: History CLEARED."); }
+            if (command == "/startrolls") { IsRecording = true; Config.IsRecording = true; PluginInterface.SavePluginConfig(Config); ChatGui.Print("Roll Tracker: Recording STARTED."); }
+            else if (command == "/stoprolls") { IsRecording = false; Config.IsRecording = false; PluginInterface.SavePluginConfig(Config); ChatGui.Print("Roll Tracker: Recording STOPPED."); }
+            else if (command == "/clearrolls") { RollHistory.Clear(); PluginInterface.SavePluginConfig(Config); ChatGui.Print("Roll Tracker: History CLEARED."); }
         }
 
         private void DrawUI() => this.WindowSystem.Draw();
 
         public void RemoveRoll(RollEntry roll)
         {
-            if (RollHistory.Contains(roll)) RollHistory.Remove(roll);
+            if (!RollHistory.Contains(roll)) return;
+            RollHistory.Remove(roll);
+            PluginInterface.SavePluginConfig(Config);
+        }
+
+        public RollEntry? GetCurrentWinner()
+        {
+            if (RollHistory.Count == 0) return null;
+            if (TargetMode)
+            {
+                if (ThresholdMode) return null;
+                if (TargetNumbers.Count == 0) return null;
+                if (ClosestWins)
+                    return RollHistory.OrderBy(r => TargetNumbers.Min(t => Math.Abs(r.RollValue - t))).ThenBy(r => r.Time).FirstOrDefault();
+                return RollHistory.Where(r => TargetNumbers.Contains(r.RollValue)).OrderByDescending(r => r.Time).FirstOrDefault();
+            }
+            return HighWins ? RollHistory.OrderByDescending(r => r.RollValue).FirstOrDefault() : RollHistory.OrderBy(r => r.RollValue).FirstOrDefault();
+        }
+
+        public List<RollEntry> GetThresholdQualifiers()
+        {
+            if (!TargetMode || !ThresholdMode || RollHistory.Count == 0) return new List<RollEntry>();
+            return ThresholdAbove
+                ? RollHistory.Where(r => r.RollValue >= ThresholdValue).OrderByDescending(r => r.RollValue).ToList()
+                : RollHistory.Where(r => r.RollValue <= ThresholdValue).OrderBy(r => r.RollValue).ToList();
+        }
+
+        public void SnapLap()
+        {
+            if (RollHistory.Count == 0) return;
+            string winnerName;
+            int winnerRoll;
+            if (TargetMode && ThresholdMode)
+            {
+                var qualifiers = GetThresholdQualifiers();
+                var dir = ThresholdAbove ? ">=" : "<=";
+                winnerName = qualifiers.Count > 0
+                    ? $"{qualifiers.Count} qualify ({dir}{ThresholdValue})"
+                    : $"No qualifiers ({dir}{ThresholdValue})";
+                winnerRoll = 0;
+            }
+            else
+            {
+                var winner = GetCurrentWinner();
+                winnerName = winner?.PlayerName ?? string.Empty;
+                winnerRoll = winner?.RollValue ?? 0;
+            }
+            Laps.Insert(0, new LapEntry
+            {
+                Number = Laps.Count + 1,
+                Time = DateTime.Now,
+                WinnerName = winnerName,
+                WinnerRoll = winnerRoll,
+                Rolls = RollHistory.ToList()
+            });
+            RollHistory.Clear();
+            PluginInterface.SavePluginConfig(Config);
         }
 
         private void CleanOldRolls()
         {
-            if (this.ClearMinutes <= 0) return;
-            var cutoff = DateTime.Now.AddMinutes(-this.ClearMinutes);
-            this.RollHistory.RemoveAll(r => r.Time < cutoff);
+            if (ClearMinutes <= 0) return;
+            var cutoff = DateTime.Now.AddMinutes(-ClearMinutes);
+            int removed = RollHistory.RemoveAll(r => r.Time < cutoff);
+            if (removed > 0) PluginInterface.SavePluginConfig(Config);
         }
 
         private string CleanPlayerName(string rawName)
@@ -171,6 +231,20 @@ namespace SimpleRollTracker
                     RollValue = rollValue,
                     Time = DateTime.Now
                 });
+
+                Config.LifetimeTotalRolls++;
+                Config.LifetimeRollSum += rollValue;
+                if (Config.LifetimeTotalRolls == 1 || rollValue > Config.LifetimeHighestRoll)
+                {
+                    Config.LifetimeHighestRoll = rollValue;
+                    Config.LifetimeHighestPlayer = capturedName;
+                }
+                if (Config.LifetimeTotalRolls == 1 || rollValue < Config.LifetimeLowestRoll)
+                {
+                    Config.LifetimeLowestRoll = rollValue;
+                    Config.LifetimeLowestPlayer = capturedName;
+                }
+                PluginInterface.SavePluginConfig(Config);
 
                 bool isWinner = this.TargetMode && this.TargetNumbers.Contains(rollValue);
                 bool isFunny = this.FunnyNumbers.Contains(rollValue);
