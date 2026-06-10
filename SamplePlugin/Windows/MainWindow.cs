@@ -19,6 +19,9 @@ namespace SimpleRollTracker.Windows
         private Plugin plugin;
         private int nextTargetInput = 0;
         private int nextFunnyInput = 0;
+        private string playerHistoryFilter = string.Empty;
+        private string selectedHistoryPlayer = string.Empty;
+        private bool openPlayerHistory;
 
         public MainWindow(Plugin plugin) : base("Simple Roll Tracker")
         {
@@ -323,7 +326,16 @@ namespace SimpleRollTracker.Windows
                                     var color = isWin ? new Vector4(1, 0.8f, 0, 1) : new Vector4(1, 1, 1, 1);
                                     ImGui.TableNextRow();
                                     ImGui.TableNextColumn(); ImGui.TextColored(color, roll.Time.ToString("HH:mm:ss"));
-                                    ImGui.TableNextColumn(); ImGui.TextColored(color, roll.PlayerName);
+                                    ImGui.TableNextColumn();
+                                    ImGui.PushStyleColor(ImGuiCol.Text, color);
+                                    if (ImGui.Selectable(roll.PlayerName))
+                                    {
+                                        this.selectedHistoryPlayer = roll.PlayerName;
+                                        this.playerHistoryFilter = string.Empty;
+                                        this.openPlayerHistory = true;
+                                    }
+                                    ImGui.PopStyleColor();
+                                    if (ImGui.IsItemHovered()) ImGui.SetTooltip("Open player history");
                                     ImGui.TableNextColumn(); ImGui.TextColored(color, roll.RollValue.ToString());
                                 }
                                 ImGui.EndTable();
@@ -333,6 +345,123 @@ namespace SimpleRollTracker.Windows
                         ImGui.PopID();
                     }
                 }
+                ImGui.Separator();
+            }
+
+            // --- PLAYER HISTORY ---
+            if (this.openPlayerHistory)
+            {
+                ImGui.SetNextItemOpen(true, ImGuiCond.Always);
+                this.openPlayerHistory = false;
+            }
+
+            if (ImGui.CollapsingHeader("Player History"))
+            {
+                var savedPlayers = this.plugin.Laps
+                    .SelectMany(lap => lap.Rolls)
+                    .Select(roll => roll.PlayerName)
+                    .Where(name => !string.IsNullOrWhiteSpace(name))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+
+                if (savedPlayers.Count == 0)
+                {
+                    ImGui.TextDisabled("Save a round to build player history.");
+                }
+                else
+                {
+                    ImGui.SetNextItemWidth(-1);
+                    ImGui.InputTextWithHint("##PlayerHistoryFilter", "Search players...", ref this.playerHistoryFilter, 100);
+
+                    var filteredPlayers = savedPlayers
+                        .Where(name => string.IsNullOrWhiteSpace(this.playerHistoryFilter)
+                            || name.Contains(this.playerHistoryFilter, StringComparison.OrdinalIgnoreCase))
+                        .ToList();
+
+                    ImGui.SetNextItemWidth(-1);
+                    var preview = string.IsNullOrEmpty(this.selectedHistoryPlayer)
+                        ? "Select a player..."
+                        : this.selectedHistoryPlayer;
+
+                    if (ImGui.BeginCombo("##PlayerHistorySelect", preview))
+                    {
+                        foreach (var playerName in filteredPlayers)
+                        {
+                            var isSelected = playerName.Equals(this.selectedHistoryPlayer, StringComparison.OrdinalIgnoreCase);
+                            if (ImGui.Selectable(playerName, isSelected))
+                                this.selectedHistoryPlayer = playerName;
+                            if (isSelected)
+                                ImGui.SetItemDefaultFocus();
+                        }
+
+                        if (filteredPlayers.Count == 0)
+                            ImGui.TextDisabled("No matching players.");
+
+                        ImGui.EndCombo();
+                    }
+
+                    var playerRolls = this.plugin.Laps
+                        .SelectMany(lap => lap.Rolls
+                            .Where(roll => roll.PlayerName.Equals(this.selectedHistoryPlayer, StringComparison.OrdinalIgnoreCase))
+                            .Select(roll => new { Lap = lap, Roll = roll }))
+                        .OrderByDescending(entry => entry.Lap.Time)
+                        .ThenByDescending(entry => entry.Roll.Time)
+                        .ToList();
+
+                    if (playerRolls.Count > 0)
+                    {
+                        var roundsPlayed = playerRolls.Select(entry => entry.Lap).Distinct().Count();
+                        var wins = playerRolls
+                            .Select(entry => entry.Lap)
+                            .Distinct()
+                            .Count(lap => lap.WinnerName.Equals(this.selectedHistoryPlayer, StringComparison.OrdinalIgnoreCase));
+
+                        ImGui.Spacing();
+                        ImGui.Text($"Saved rounds: {roundsPlayed}    Rolls: {playerRolls.Count}    Wins: {wins}");
+                        ImGui.Text($"High: {playerRolls.Max(entry => entry.Roll.RollValue)}    " +
+                                   $"Low: {playerRolls.Min(entry => entry.Roll.RollValue)}    " +
+                                   $"Average: {playerRolls.Average(entry => entry.Roll.RollValue):F1}");
+
+                        if (ImGui.BeginTable("PlayerHistoryTable", 4,
+                            ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY | ImGuiTableFlags.Resizable,
+                            new Vector2(0, 220)))
+                        {
+                            ImGui.TableSetupColumn("Round", ImGuiTableColumnFlags.WidthFixed, 55);
+                            ImGui.TableSetupColumn("Saved", ImGuiTableColumnFlags.WidthFixed, 120);
+                            ImGui.TableSetupColumn("Roll", ImGuiTableColumnFlags.WidthFixed, 50);
+                            ImGui.TableSetupColumn("Result", ImGuiTableColumnFlags.None);
+                            ImGui.TableHeadersRow();
+
+                            foreach (var entry in playerRolls)
+                            {
+                                var isWinner = entry.Lap.WinnerName.Equals(
+                                    this.selectedHistoryPlayer,
+                                    StringComparison.OrdinalIgnoreCase);
+                                var color = isWinner
+                                    ? new Vector4(1, 0.8f, 0, 1)
+                                    : new Vector4(1, 1, 1, 1);
+
+                                ImGui.TableNextRow();
+                                ImGui.TableNextColumn();
+                                ImGui.TextColored(color, entry.Lap.Number.ToString());
+                                ImGui.TableNextColumn();
+                                ImGui.TextColored(color, entry.Lap.Time.ToString("yyyy-MM-dd HH:mm"));
+                                ImGui.TableNextColumn();
+                                ImGui.TextColored(color, entry.Roll.RollValue.ToString());
+                                ImGui.TableNextColumn();
+                                ImGui.TextColored(color, isWinner ? "Winner" : entry.Lap.WinnerName);
+                            }
+
+                            ImGui.EndTable();
+                        }
+                    }
+                    else if (!string.IsNullOrEmpty(this.selectedHistoryPlayer))
+                    {
+                        this.selectedHistoryPlayer = string.Empty;
+                    }
+                }
+
                 ImGui.Separator();
             }
 
