@@ -16,9 +16,9 @@ namespace SimpleRollTracker.Windows
 {
     public class MainWindow : Window, IDisposable
     {
-        private Plugin plugin;
-        private int nextTargetInput = 0;
-        private int nextFunnyInput = 0;
+        private readonly Plugin plugin;
+        private int nextTargetInput;
+        private int nextFunnyInput;
         private string playerHistoryFilter = string.Empty;
         private string selectedHistoryPlayer = string.Empty;
         private bool openPlayerHistory;
@@ -41,14 +41,14 @@ namespace SimpleRollTracker.Windows
             {
                 this.plugin.IsRecording = !this.plugin.IsRecording;
                 this.plugin.Config.IsRecording = this.plugin.IsRecording;
-                Plugin.PluginInterface.SavePluginConfig(this.plugin.Config);
+                this.plugin.SaveConfig();
             }
 
             ImGui.SameLine();
             if (ImGui.Button("Clear List"))
             {
                 this.plugin.RollHistory.Clear();
-                Plugin.PluginInterface.SavePluginConfig(this.plugin.Config);
+                this.plugin.SaveConfig();
             }
 
             ImGui.SameLine();
@@ -57,7 +57,7 @@ namespace SimpleRollTracker.Windows
             {
                 if (this.plugin.ClearMinutes < 0) this.plugin.ClearMinutes = 0;
                 this.plugin.Config.ClearMinutes = this.plugin.ClearMinutes;
-                Plugin.PluginInterface.SavePluginConfig(this.plugin.Config);
+                this.plugin.SaveConfig();
             }
             if (ImGui.IsItemHovered()) ImGui.SetTooltip("Automatically remove rolls older than X minutes (0 = Disabled)");
 
@@ -80,12 +80,12 @@ namespace SimpleRollTracker.Windows
                 if (ImGui.Button("UNLOCK")) this.plugin.LockedTargetName = string.Empty;
             }
 
-            if (ImGui.Checkbox("Allow only 1 roll per person", ref this.plugin.OneRollPerPerson)) { }
+            ImGui.Checkbox("Allow only 1 roll per person", ref this.plugin.OneRollPerPerson);
 
             ImGui.Separator();
 
             // --- TARGET MODE ---
-            if (ImGui.Checkbox("Target Mode", ref this.plugin.TargetMode)) { }
+            ImGui.Checkbox("Target Mode", ref this.plugin.TargetMode);
 
             if (this.plugin.TargetMode)
             {
@@ -160,7 +160,7 @@ namespace SimpleRollTracker.Windows
                         cfg.LifetimeHighestPlayer = string.Empty;
                         cfg.LifetimeLowestRoll = 0;
                         cfg.LifetimeLowestPlayer = string.Empty;
-                        Plugin.PluginInterface.SavePluginConfig(cfg);
+                        this.plugin.SaveConfig();
                     }
                 }
                 else
@@ -171,7 +171,6 @@ namespace SimpleRollTracker.Windows
 
             ImGui.Separator();
 
-            // --- ANNOUNCEMENT SETTINGS (RESTORED) ---
             if (ImGui.CollapsingHeader("Announcement Template"))
             {
                 ImGui.TextDisabled("Use {winner}, {roll} as placeholders.");
@@ -301,7 +300,7 @@ namespace SimpleRollTracker.Windows
                     if (ImGui.Button("Clear Rounds"))
                     {
                         this.plugin.Laps.Clear();
-                        Plugin.PluginInterface.SavePluginConfig(this.plugin.Config);
+                        this.plugin.SaveConfig();
                     }
 
                     foreach (var lap in this.plugin.Laps)

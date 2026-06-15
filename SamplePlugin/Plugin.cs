@@ -20,7 +20,10 @@ namespace SimpleRollTracker
 {
     public sealed class Plugin : IDalamudPlugin
     {
-        public string Name => "Simple Roll Tracker";
+        private const string RollsCommand = "/rolls";
+        private const string StartRollsCommand = "/startrolls";
+        private const string StopRollsCommand = "/stoprolls";
+        private const string ClearRollsCommand = "/clearrolls";
 
         [PluginService] internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
         [PluginService] internal static IChatGui ChatGui { get; private set; } = null!;
@@ -35,27 +38,26 @@ namespace SimpleRollTracker
 
         public bool IsRecording = true;
         public bool HighWins = true;
-        public bool TargetMode = false;
-        public bool ClosestWins = false;
+        public bool TargetMode;
+        public bool ClosestWins;
 
-        public List<int> TargetNumbers = new List<int>();
-        public bool ThresholdMode = false;
+        public List<int> TargetNumbers { get; } = new();
+        public bool ThresholdMode;
         public int ThresholdValue = 500;
         public bool ThresholdAbove = true;
-        public List<int> FunnyNumbers = new List<int> { 0, 1, 69, 420, 777, 999 };
+        public List<int> FunnyNumbers { get; } = new() { 0, 1, 69, 420, 777, 999 };
 
         public Configuration Config { get; private set; }
 
-        public int ClearMinutes = 0;
+        public int ClearMinutes;
         public string LockedTargetName = string.Empty;
-        public bool OneRollPerPerson = false;
+        public bool OneRollPerPerson;
 
-        // --- NEW: CHAT TEMPLATES ---
         public string MsgOpen = "Rolls are now OPEN! Type /random to play!";
         public string MsgClose = "Rolls are now CLOSED! Calculating winner...";
         public string MsgWinner = "Congratulations to {winner} for rolling a {roll}!";
 
-        public WindowSystem WindowSystem = new("RollTracker");
+        private WindowSystem WindowSystem { get; } = new("RollTracker");
         private MainWindow MainWindow { get; init; }
 
         public Plugin()
@@ -64,13 +66,13 @@ namespace SimpleRollTracker
             ClearMinutes = Config.ClearMinutes;
             IsRecording = Config.IsRecording;
 
-            this.MainWindow = new MainWindow(this);
-            this.WindowSystem.AddWindow(this.MainWindow);
+            MainWindow = new MainWindow(this);
+            WindowSystem.AddWindow(MainWindow);
 
-            CommandManager.AddHandler("/rolls", new CommandInfo(OnCommand) { HelpMessage = "Opens window." });
-            CommandManager.AddHandler("/startrolls", new CommandInfo(OnMacroCommand) { HelpMessage = "Starts recording." });
-            CommandManager.AddHandler("/stoprolls", new CommandInfo(OnMacroCommand) { HelpMessage = "Stops recording." });
-            CommandManager.AddHandler("/clearrolls", new CommandInfo(OnMacroCommand) { HelpMessage = "Clears history." });
+            CommandManager.AddHandler(RollsCommand, new CommandInfo(OnCommand) { HelpMessage = "Opens window." });
+            CommandManager.AddHandler(StartRollsCommand, new CommandInfo(OnMacroCommand) { HelpMessage = "Starts recording." });
+            CommandManager.AddHandler(StopRollsCommand, new CommandInfo(OnMacroCommand) { HelpMessage = "Stops recording." });
+            CommandManager.AddHandler(ClearRollsCommand, new CommandInfo(OnMacroCommand) { HelpMessage = "Clears history." });
 
             PluginInterface.UiBuilder.Draw += DrawUI;
             ChatGui.ChatMessage += OnChatMessage;
@@ -78,30 +80,51 @@ namespace SimpleRollTracker
 
         public void Dispose()
         {
-            this.WindowSystem.RemoveAllWindows();
-            CommandManager.RemoveHandler("/rolls");
-            CommandManager.RemoveHandler("/startrolls");
-            CommandManager.RemoveHandler("/stoprolls");
-            CommandManager.RemoveHandler("/clearrolls");
+            PluginInterface.UiBuilder.Draw -= DrawUI;
             ChatGui.ChatMessage -= OnChatMessage;
+            CommandManager.RemoveHandler(RollsCommand);
+            CommandManager.RemoveHandler(StartRollsCommand);
+            CommandManager.RemoveHandler(StopRollsCommand);
+            CommandManager.RemoveHandler(ClearRollsCommand);
+            WindowSystem.RemoveAllWindows();
+            MainWindow.Dispose();
         }
 
         private void OnCommand(string command, string args) => MainWindow.IsOpen = !MainWindow.IsOpen;
 
         private void OnMacroCommand(string command, string args)
         {
-            if (command == "/startrolls") { IsRecording = true; Config.IsRecording = true; PluginInterface.SavePluginConfig(Config); ChatGui.Print("Roll Tracker: Recording STARTED."); }
-            else if (command == "/stoprolls") { IsRecording = false; Config.IsRecording = false; PluginInterface.SavePluginConfig(Config); ChatGui.Print("Roll Tracker: Recording STOPPED."); }
-            else if (command == "/clearrolls") { RollHistory.Clear(); PluginInterface.SavePluginConfig(Config); ChatGui.Print("Roll Tracker: History CLEARED."); }
+            switch (command)
+            {
+                case StartRollsCommand:
+                    IsRecording = true;
+                    Config.IsRecording = true;
+                    SaveConfig();
+                    ChatGui.Print("Roll Tracker: Recording STARTED.");
+                    break;
+                case StopRollsCommand:
+                    IsRecording = false;
+                    Config.IsRecording = false;
+                    SaveConfig();
+                    ChatGui.Print("Roll Tracker: Recording STOPPED.");
+                    break;
+                case ClearRollsCommand:
+                    RollHistory.Clear();
+                    SaveConfig();
+                    ChatGui.Print("Roll Tracker: History CLEARED.");
+                    break;
+            }
         }
 
-        private void DrawUI() => this.WindowSystem.Draw();
+        private void DrawUI() => WindowSystem.Draw();
+
+        internal void SaveConfig() => PluginInterface.SavePluginConfig(Config);
 
         public void RemoveRoll(RollEntry roll)
         {
             if (!RollHistory.Contains(roll)) return;
             RollHistory.Remove(roll);
-            PluginInterface.SavePluginConfig(Config);
+            SaveConfig();
         }
 
         public RollEntry? GetCurrentWinner()
@@ -155,7 +178,7 @@ namespace SimpleRollTracker
                 Rolls = RollHistory.ToList()
             });
             RollHistory.Clear();
-            PluginInterface.SavePluginConfig(Config);
+            SaveConfig();
         }
 
         private void CleanOldRolls()
@@ -163,7 +186,7 @@ namespace SimpleRollTracker
             if (ClearMinutes <= 0) return;
             var cutoff = DateTime.Now.AddMinutes(-ClearMinutes);
             int removed = RollHistory.RemoveAll(r => r.Time < cutoff);
-            if (removed > 0) PluginInterface.SavePluginConfig(Config);
+            if (removed > 0) SaveConfig();
         }
 
         private string CleanPlayerName(string rawName)
@@ -183,7 +206,7 @@ namespace SimpleRollTracker
         private void OnChatMessage(IHandleableChatMessage msg)
         {
             if (msg.LogKind == XivChatType.Echo) return;
-            if (!this.IsRecording) return;
+            if (!IsRecording) return;
 
             CleanOldRolls();
 
@@ -212,20 +235,19 @@ namespace SimpleRollTracker
                 if (string.IsNullOrEmpty(capturedName)) capturedName = msg.Sender.ToString();
                 capturedName = CleanPlayerName(capturedName);
 
-                if (!string.IsNullOrEmpty(this.LockedTargetName))
+                if (!string.IsNullOrEmpty(LockedTargetName))
                 {
-                    // Compare base names only (strip @Server for cross-world players)
                     var baseNameFromRoll = capturedName.Split('@')[0];
-                    if (baseNameFromRoll != this.LockedTargetName) return;
+                    if (baseNameFromRoll != LockedTargetName) return;
                 }
 
-                if (this.OneRollPerPerson)
+                if (OneRollPerPerson)
                 {
-                    bool alreadyRolled = this.RollHistory.Any(x => x.PlayerName == capturedName);
+                    bool alreadyRolled = RollHistory.Any(x => x.PlayerName == capturedName);
                     if (alreadyRolled) return;
                 }
 
-                this.RollHistory.Add(new RollEntry
+                RollHistory.Add(new RollEntry
                 {
                     PlayerName = capturedName,
                     RollValue = rollValue,
@@ -244,10 +266,10 @@ namespace SimpleRollTracker
                     Config.LifetimeLowestRoll = rollValue;
                     Config.LifetimeLowestPlayer = capturedName;
                 }
-                PluginInterface.SavePluginConfig(Config);
+                SaveConfig();
 
-                bool isWinner = this.TargetMode && this.TargetNumbers.Contains(rollValue);
-                bool isFunny = this.FunnyNumbers.Contains(rollValue);
+                bool isWinner = TargetMode && TargetNumbers.Contains(rollValue);
+                bool isFunny = FunnyNumbers.Contains(rollValue);
                 var typeMsg = (isWinner || isFunny) ? NotificationType.Warning : NotificationType.Success;
 
                 NotificationManager.AddNotification(new Notification
@@ -268,36 +290,26 @@ namespace SimpleRollTracker
             else ChatGui.PrintError($"[Roll Tracker] Could not find '{searchName}' nearby.");
         }
 
-        // --- NEW: CHAT ANNOUNCER HELPER ---
-        // Sends the message to the default chat channel (usually /say or /party depending on context)
-        // For plugins, we often have to "ExecuteCommand" to speak.
         public void Announce(string template, RollEntry? winner = null)
         {
             string message = template;
 
-            // Replace Placeholders
             if (winner != null)
             {
-                // Strip @World for chat aesthetics
                 var shortName = winner.PlayerName.Split('@')[0];
                 message = message.Replace("{winner}", shortName)
                                  .Replace("{roll}", winner.RollValue.ToString());
             }
 
-            // Inject global variables
-            if (this.TargetMode && this.TargetNumbers.Count > 0)
+            if (TargetMode && TargetNumbers.Count > 0)
             {
-                message = message.Replace("{target}", string.Join(", ", this.TargetNumbers));
+                message = message.Replace("{target}", string.Join(", ", TargetNumbers));
             }
             else
             {
                 message = message.Replace("{target}", "Highest");
             }
 
-            // Send to chat!
-            // We use /s (Say) by default, or you could make this configurable.
-            // Safer to copy to clipboard? Or force send?
-            // Let's force send to /say for now as it's a venue tool.
             CommandManager.ProcessCommand($"/s {message}");
         }
     }
